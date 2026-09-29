@@ -126,7 +126,7 @@ textarea{resize:vertical; min-height:70px;}
   position:relative; width:56px; height:56px; border-radius:var(--radius-sm); overflow:hidden;
   border:1px solid var(--line-strong); flex-shrink:0;
 }
-.photo-thumb img{width:100%; height:100%; object-fit:cover; display:block;}
+.photo-thumb img{width:100%; height:100%; object-fit:cover; display:block; cursor:pointer;}
 .photo-thumb .rm{
   position:absolute; top:0; right:0; background:rgba(30,20,10,.65); color:#fff; border:none;
   width:18px; height:18px; font-size:11px; line-height:18px; text-align:center; cursor:pointer;
@@ -177,7 +177,7 @@ textarea{resize:vertical; min-height:70px;}
 .flag-item .t{font-size:13px; font-weight:700; color:var(--warn-ink);}
 .flag-item .n{font-size:12px; color:var(--warn-ink); margin-top:4px;}
 .flag-item .imgs{display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;}
-.flag-item .imgs img{width:64px; height:64px; object-fit:cover; border-radius:6px; border:1px solid var(--line-strong);}
+.flag-item .imgs img{width:64px; height:64px; object-fit:cover; border-radius:6px; border:1px solid var(--line-strong); cursor:pointer;}
 
 .hist-card{
   background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-md);
@@ -196,6 +196,9 @@ textarea{resize:vertical; min-height:70px;}
 .del-btn{font-size:12px; color:var(--danger); font-weight:700; cursor:pointer; background:none; border:none; padding:0;}
 
 .confirm-mask{position:fixed; inset:0; background:rgba(20,20,15,.5); display:flex; align-items:flex-end; justify-content:center; z-index:80;}
+.lightbox-mask{position:fixed; inset:0; background:rgba(10,10,10,.92); display:flex; align-items:center; justify-content:center; z-index:100; padding:24px;}
+.lightbox-mask img{max-width:100%; max-height:100%; border-radius:10px; box-shadow:0 10px 30px rgba(0,0,0,.4);}
+.lightbox-close{position:absolute; top:16px; right:20px; color:#fff; font-size:28px; line-height:1; cursor:pointer; opacity:.85;}
 .confirm-box{background:var(--surface); border-radius:18px 18px 0 0; padding:20px; width:100%; max-width:640px;}
 .confirm-box p{font-size:14px; margin:0 0 16px;}
 .confirm-actions{display:flex; gap:10px;}
@@ -262,6 +265,16 @@ async function fetchSheetRecords(){
   const data = await res.json();
   if(data.status !== "ok") throw new Error(data.message || "sheet fetch failed");
   return data.records || [];
+}
+
+async function deleteFromSheet(id){
+  const res = await fetch(SHEET_WEBAPP_URL, {
+    method: "POST",
+    headers: {"Content-Type": "text/plain;charset=utf-8"},
+    body: JSON.stringify({action:"delete", id})
+  });
+  const data = await res.json();
+  if(data.status !== "ok") throw new Error(data.message || "sheet delete failed");
 }
 
 
@@ -377,6 +390,7 @@ let state = {
   view:"new",
   detailId:null,
   pendingDelete:null,
+  lightboxImage:null,
   form:null
 };
 
@@ -485,8 +499,8 @@ async function completeAudit(){
     toast("実施者を選択してください");
     return;
   }
-  if(stats.rated===0){
-    toast("少なくとも1項目は評価してください");
+  if(stats.rated < stats.total){
+    toast(`未回答の項目があります（あと${stats.total - stats.rated}件）`);
     return;
   }
   const id = "a"+Date.now();
@@ -579,6 +593,8 @@ async function confirmDelete(){
   try{
     if(cloudEnabled){
       await db.collection(AUDITS_COLLECTION).doc(id).delete();
+    }else if(SHEET_WEBAPP_URL){
+      await deleteFromSheet(id);
     }else{
       await storageAPI.delete("audit:"+id);
       await storageAPI.delete("meta:"+id);
@@ -660,7 +676,7 @@ function renderProgress(){
 function renderItemCard(it, idx){
   const rc = it.rating ? RATE_DEF[it.rating].cls : "";
   const photos = it.photos.map((p,pi)=>`
-    <div class="photo-thumb"><img src="${p}"><button class="rm" onclick="removePhoto(${idx},${pi})">×</button></div>
+    <div class="photo-thumb"><img src="${p}" onclick="openLightbox(this.src)"><button class="rm" onclick="removePhoto(${idx},${pi})">×</button></div>
   `).join("");
   return `
   <div class="item ${rc?'rated-'+rc:''}">
@@ -722,12 +738,13 @@ function renderNewAudit(){
       <textarea placeholder="気になった点、全体の様子などを自由に記入" oninput="state.form.comment=this.value">${f.comment}</textarea>
     </div>
     <button class="big-btn" onclick="completeAudit()">監査を完了して結果をまとめる</button>
-    <p class="small-note">評価するとその場で自動集計されます。未回答の項目があっても保存できます。</p>
+    <p class="small-note">評価するとその場で自動集計されます。全項目を回答しないと完了できません。</p>
   </div>`;
 }
 
 function rankClass(rank){ return "rank-"+rank; }
 let currentRecord = null;
+let currentSheetRecord = null;
 
 function renderReportBody(record, opts){
   opts = opts || {};
@@ -756,7 +773,7 @@ function renderReportBody(record, opts){
       <div class="flag-item">
         <div class="t">${it.ja} <span style="font-weight:400;font-size:11px;">${it.en}</span></div>
         ${it.note? `<div class="n">${it.note}</div>`:""}
-        ${it.photos && it.photos.length? `<div class="imgs">${it.photos.map(p=>`<img src="${p}">`).join("")}</div>`:""}
+        ${it.photos && it.photos.length? `<div class="imgs">${it.photos.map(p=>`<img src="${p}" onclick="openLightbox(this.src)">`).join("")}</div>`:""}
       </div>`).join("")}
   </div>`:`
   <div class="card"><p style="font-size:13px;color:var(--ink-soft);margin:0;">要改善（△）に該当する項目はありませんでした。</p></div>`}
@@ -815,10 +832,11 @@ async function loadDetailContent(){
 }
 
 function renderSheetDetail(r){
+  currentSheetRecord = r;
   const rank = RANK_LABEL_TO_LETTER[r.rankLabel] || "D";
   const itemLines = (r.itemSummary||"").split("\n").filter(Boolean);
-  const flagLines = (r.flagSummary||"").split("\n").filter(Boolean);
-  const photos = r.photoLinks || [];
+  const photoInfo = r.photoInfo || [];
+  const legacyPhotos = r.photoLinks || []; // 旧データ（項目との紐づけ情報がない場合）のフォールバック
   return `
   <div class="card">
     <div class="summary-header">
@@ -831,25 +849,37 @@ function renderSheetDetail(r){
       <div class="stat-box"><div class="n" style="color:var(--ok-ink)">${r.ok}</div><div class="l">〇 普通</div></div>
       <div class="stat-box"><div class="n" style="color:var(--warn-ink)">${r.warn}</div><div class="l">△ 要改善</div></div>
     </div>
+    <button class="big-btn" style="margin-top:14px;" id="pptxBtn" onclick="exportSheetPptx()">写真・コメント付きでPowerPointに保存</button>
+    <p class="small-note" id="pptxNote">タップするとこの監査結果を .pptx ファイルとしてダウンロードします（英語・タガログ語で作成されます）</p>
   </div>
-  ${flagLines.length? `
+  ${photoInfo.length? `
   <div class="card">
-    <h2>要改善項目（△）</h2>
-    ${flagLines.map(l=>`<div class="flag-item"><div class="t">${l}</div></div>`).join("")}
-  </div>`:""}
-  ${photos.length? `
+    <h2>項目ごとの写真・コメント</h2>
+    ${photoInfo.map(it=>{
+      const markCls = it.rating==="good"?"good":it.rating==="ok"?"ok":it.rating==="warn"?"warn":"";
+      const mark = it.rating==="good"?"◎":it.rating==="ok"?"〇":it.rating==="warn"?"△":"-";
+      return `
+      <div class="flag-item" style="${it.rating==='warn'?'':'border-color:var(--line-strong);background:var(--surface-soft);'}">
+        <div class="t">${mark} ${it.num}.${it.ja}</div>
+        ${it.note? `<div class="n">${it.note}</div>`:""}
+        ${it.photos && it.photos.length? `<div class="imgs">${it.photos.map(p=>`<img src="${p}" onclick="openLightbox(this.src)">`).join("")}</div>`:""}
+      </div>`;
+    }).join("")}
+  </div>`: (legacyPhotos.length? `
   <div class="card">
     <h2>写真</h2>
+    <p class="small-note" style="margin-bottom:8px;">この記録は旧形式のため、写真と項目の対応が分かりません。</p>
     <div class="imgs" style="display:flex;flex-wrap:wrap;gap:8px;">
-      ${photos.map(p=>`<a href="${p}" target="_blank"><img src="${p}" style="width:88px;height:88px;object-fit:cover;border-radius:8px;border:1px solid var(--line-strong);"></a>`).join("")}
+      ${legacyPhotos.map(p=>`<img src="${p}" onclick="openLightbox(this.src)" style="width:88px;height:88px;object-fit:cover;border-radius:8px;border:1px solid var(--line-strong);cursor:pointer;">`).join("")}
     </div>
-  </div>`:""}
+  </div>`:"")}
   ${r.comment? `<div class="card"><h2>全体コメント</h2><p style="font-size:13px;line-height:1.6;margin:0;">${r.comment}</p></div>`:""}
   <div class="card">
     <h2>全項目一覧</h2>
     <p style="font-size:12px;line-height:1.9;white-space:pre-wrap;margin:0;">${itemLines.join("\n")}</p>
   </div>
-  <p class="small-note">この記録はスプレッドシートから読み込んでいます。削除・PowerPoint出力はスプレッドシート側で行ってください。</p>`;
+  <p class="small-note">この記録はスプレッドシートから読み込んでいます。</p>
+  <button class="ghost-btn" style="color:var(--danger);border-color:var(--danger);" onclick="requestDelete('${r.id}')">この記録を削除する</button>`;
 }
 
 function renderHistory(){
@@ -873,6 +903,23 @@ async function refreshHistoryView(){
       <div class="hist-meta">${m.date}｜${m.inspector}｜◎〇平均 ${m.avg}点${m.warn>0?`｜△ ${m.warn}件`:""}</div>
     </div>
   `).join("");
+}
+
+function openLightbox(src){
+  state.lightboxImage = src;
+  render();
+}
+function closeLightbox(){
+  state.lightboxImage = null;
+  render();
+}
+function renderLightbox(){
+  if(!state.lightboxImage) return "";
+  return `
+  <div class="lightbox-mask" onclick="closeLightbox()">
+    <span class="lightbox-close">×</span>
+    <img src="${state.lightboxImage}">
+  </div>`;
 }
 
 function renderConfirm(){
@@ -996,6 +1043,122 @@ async function exportPptx(){
   }
 }
 
+async function exportSheetPptx(){
+  const r = currentSheetRecord;
+  if(!r){ toast("出力するデータがありません"); return; }
+  if(typeof PptxGenJS === "undefined"){
+    toast("PowerPoint機能の読み込みに失敗しました。インターネット接続をご確認ください");
+    return;
+  }
+  setPptxBusy(true, "PowerPointを作成しています…");
+  try{
+    const dormInfo = DORMS.find(d=>d.name===r.dormName) || {en:r.dormName, tl:r.dormName, items:[]};
+    const rank = RANK_LABEL_TO_LETTER[r.rankLabel] || "D";
+    const rankTr = RANK_TR[rank] || {en:r.rankLabel, tl:r.rankLabel};
+
+    // 「1.項目名:マーク」の行を、寮の項目マスタ（英語・タガログ語つき）に番号で突き合わせる
+    const markToKey = {"◎":"good","〇":"ok","△":"warn"};
+    const itemLines = (r.itemSummary||"").split("\n").filter(Boolean);
+    const photoInfoByNum = {};
+    (r.photoInfo||[]).forEach(pi=>{ photoInfoByNum[pi.num] = pi; });
+    const items = itemLines.map(line=>{
+      const m = line.match(/^(\d+)\.(.*):([◎〇△-])$/);
+      if(!m) return null;
+      const idx = parseInt(m[1],10);
+      const master = dormInfo.items[idx-1] || [m[2], m[2], m[2]];
+      const info = photoInfoByNum[idx];
+      return {
+        num: idx, ja:master[0], en:master[1], tl:master[2],
+        rating: markToKey[m[3]] || null,
+        note: (info && info.note) || "",
+        photos: (info && info.photos) || []
+      };
+    }).filter(Boolean);
+
+    const pptx = new PptxGenJS();
+    pptx.defineLayout({name:"WIDE", width:10, height:5.63});
+    pptx.layout = "WIDE";
+
+    const title = pptx.addSlide();
+    title.background = {color:"F6F4EF"};
+    title.addText(PPTX_TXT.headerTitle, {x:0.5,y:0.3,w:9,h:0.45,fontSize:12,color:"5C6B63",bold:true});
+    title.addText(dormInfo.en, {x:0.5,y:0.72,w:9,h:0.45,fontSize:26,bold:true,color:"173D34"});
+    title.addText(dormInfo.tl, {x:0.5,y:1.15,w:9,h:0.35,fontSize:15,italic:true,color:"2B6659"});
+    title.addText(`${PPTX_TXT.date}: ${r.date}      ${PPTX_TXT.inspector}: ${r.inspector}`, {x:0.5,y:1.6,w:9,h:0.4,fontSize:13,color:"5C6B63"});
+    title.addText(`${rankTr.en} / ${rankTr.tl}  (${r.avg} / 100)`, {x:0.5,y:2.1,w:9,h:0.55,fontSize:22,bold:true,color:RANK_HEX[rank]||"20302A"});
+    title.addText(
+      `◎ ${RATE_DEF.good.en}/${RATE_DEF.good.tl}: ${r.good}    〇 ${RATE_DEF.ok.en}/${RATE_DEF.ok.tl}: ${r.ok}    △ ${RATE_DEF.warn.en}/${RATE_DEF.warn.tl}: ${r.warn}`,
+      {x:0.5,y:2.7,w:9,h:0.55,fontSize:11.5,color:"20302A"});
+    if(r.comment){
+      title.addText(PPTX_TXT.overallComment, {x:0.5,y:3.25,w:9,h:0.35,fontSize:12,bold:true,color:"2B6659"});
+      title.addText("(original / orihinal)", {x:0.5,y:3.58,w:9,h:0.25,fontSize:9,color:"8A9791"});
+      title.addText(r.comment, {x:0.5,y:3.85,w:9,h:1.5,fontSize:11,color:"20302A",valign:"top"});
+    }
+
+    const tableSlide = pptx.addSlide();
+    tableSlide.addText(PPTX_TXT.itemList, {x:0.4,y:0.2,w:9.2,h:0.4,fontSize:15,bold:true,color:"173D34"});
+    const rows = [[
+      {text:PPTX_TXT.colNo, options:{bold:true, fill:{color:"E2EEE8"}, fontSize:8}},
+      {text:PPTX_TXT.colItem, options:{bold:true, fill:{color:"E2EEE8"}, fontSize:8}},
+      {text:PPTX_TXT.colRating, options:{bold:true, fill:{color:"E2EEE8"}, fontSize:8}}
+    ]];
+    items.forEach(it=>{
+      const markColor = it.rating? (MARK_HEX[it.rating]||"20302A") : "8A9791";
+      const mark = it.rating? (it.rating==="good"?"◎":it.rating==="ok"?"〇":"△") : "-";
+      rows.push([
+        {text:String(it.num), options:{fontSize:8}},
+        {text:`${it.en}\n${it.tl}`, options:{fontSize:8}},
+        {text:mark, options:{fontSize:10, bold:true, color:markColor, align:"center"}}
+      ]);
+    });
+    const half = Math.ceil(rows.length/2);
+    const colA = [rows[0]].concat(rows.slice(1, half));
+    const colB = [rows[0]].concat(rows.slice(half));
+    tableSlide.addTable(colA, {x:0.4, y:0.68, w:4.5, colW:[0.4,3.3,0.8], fontSize:8, border:{type:"solid", color:"E4DFD3", pt:0.5}, autoPage:false});
+    if(colB.length>1){
+      tableSlide.addTable(colB, {x:5.1, y:0.68, w:4.5, colW:[0.4,3.3,0.8], fontSize:8, border:{type:"solid", color:"E4DFD3", pt:0.5}, autoPage:false});
+    }
+
+    // 写真かメモがある項目、または要改善（△）の項目を1項目1スライドで、正しく紐づいた写真とともに出力
+    const detailItems = items.filter(it => (it.photos && it.photos.length) || it.note || it.rating==="warn");
+    detailItems.forEach(it=>{
+      const slide = pptx.addSlide();
+      const markColor = it.rating? (MARK_HEX[it.rating]||"20302A") : "8A9791";
+      const ratingTr = it.rating? RATE_DEF[it.rating] : null;
+      const markSym = it.rating==="good"?"◎":it.rating==="ok"?"〇":it.rating==="warn"?"△":"";
+      const markText = ratingTr? `${markSym} ${ratingTr.en} / ${ratingTr.tl}` : PPTX_TXT.notEvaluated;
+      slide.addText(it.en, {x:0.5,y:0.3,w:6.9,h:0.45,fontSize:19,bold:true,color:"20302A"});
+      slide.addText(it.tl, {x:0.5,y:0.72,w:6.9,h:0.35,fontSize:13,italic:true,color:"2B6659"});
+      slide.addText(markText, {x:7.0,y:0.3,w:2.5,h:0.7,fontSize:12,bold:true,color:markColor,align:"right",valign:"top"});
+      let y = 1.25;
+      if(it.note){
+        slide.addText("Note (original / orihinal):", {x:0.5,y:y,w:9,h:0.3,fontSize:10,bold:true,color:"8A9791"});
+        y += 0.32;
+        slide.addText(it.note, {x:0.5,y:y,w:9,h:0.6,fontSize:12,color:"20302A",valign:"top"});
+        y += 0.75;
+      }
+      const imgs = (it.photos||[]).slice(0,3);
+      if(imgs.length){
+        const gap=0.25, w=(9-(gap*(imgs.length-1)))/imgs.length, h=w*0.75;
+        imgs.forEach((p,i)=>{
+          try{ slide.addImage({path:p, x:0.5+i*(w+gap), y:y, w:w, h:h}); }catch(e){ console.error("image add error", e); }
+        });
+      } else if(!it.note){
+        slide.addText(PPTX_TXT.noPhoto, {x:0.5,y:y,w:9,h:0.4,fontSize:12,color:"8A9791"});
+      }
+    });
+
+    const fname = `DormAudit_${dormInfo.en.replace(/[^A-Za-z0-9]+/g,"")}_${r.date}`.replace(/[\\/:*?"<>|]/g,"") + ".pptx";
+    await pptx.writeFile({fileName: fname});
+    setPptxBusy(false);
+    toast("PowerPointを保存しました");
+  }catch(e){
+    console.error("sheet pptx export error", e);
+    setPptxBusy(false, "作成に失敗しました。もう一度お試しください");
+    toast("PowerPoint作成に失敗しました（写真の読み込みが原因の場合があります）");
+  }
+}
+
 function render(){
   const app = document.getElementById("app");
   let body = "";
@@ -1012,11 +1175,17 @@ function render(){
     ${renderTabs()}
     ${body}
     ${renderConfirm()}
+    ${renderLightbox()}
   `;
 
   if(state.view==="history") refreshHistoryView();
   if(state.view==="detail") loadDetailContent();
 }
+
+render();
+</script>
+</body>
+</html>
 
 render();
 </script>
