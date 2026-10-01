@@ -260,6 +260,13 @@ async function sendToSheet(record){
 
 const RANK_LABEL_TO_LETTER = {"非常に良好":"A","良好":"B","要注意":"C","要改善":"D"};
 
+function driveEmbedUrl(url){
+  if(!url) return url;
+  const m = String(url).match(/[?&]id=([^&]+)/);
+  if(m) return "https://lh3.googleusercontent.com/d/" + m[1] + "=w1000";
+  return url;
+}
+
 async function fetchSheetRecords(){
   const res = await fetch(SHEET_WEBAPP_URL, {method:"GET"});
   const data = await res.json();
@@ -862,7 +869,7 @@ function renderSheetDetail(r){
       <div class="flag-item" style="${it.rating==='warn'?'':'border-color:var(--line-strong);background:var(--surface-soft);'}">
         <div class="t">${mark} ${it.num}.${it.ja}</div>
         ${it.note? `<div class="n">${it.note}</div>`:""}
-        ${it.photos && it.photos.length? `<div class="imgs">${it.photos.map(p=>`<img src="${p}" onclick="openLightbox(this.src)">`).join("")}</div>`:""}
+        ${it.photos && it.photos.length? `<div class="imgs">${it.photos.map(p=>`<img src="${driveEmbedUrl(p)}" onclick="openLightbox(this.src)">`).join("")}</div>`:""}
       </div>`;
     }).join("")}
   </div>`: (legacyPhotos.length? `
@@ -870,7 +877,7 @@ function renderSheetDetail(r){
     <h2>写真</h2>
     <p class="small-note" style="margin-bottom:8px;">この記録は旧形式のため、写真と項目の対応が分かりません。</p>
     <div class="imgs" style="display:flex;flex-wrap:wrap;gap:8px;">
-      ${legacyPhotos.map(p=>`<img src="${p}" onclick="openLightbox(this.src)" style="width:88px;height:88px;object-fit:cover;border-radius:8px;border:1px solid var(--line-strong);cursor:pointer;">`).join("")}
+      ${legacyPhotos.map(p=>`<img src="${driveEmbedUrl(p)}" onclick="openLightbox(this.src)" style="width:88px;height:88px;object-fit:cover;border-radius:8px;border:1px solid var(--line-strong);cursor:pointer;">`).join("")}
     </div>
   </div>`:"")}
   ${r.comment? `<div class="card"><h2>全体コメント</h2><p style="font-size:13px;line-height:1.6;margin:0;">${r.comment}</p></div>`:""}
@@ -1141,7 +1148,7 @@ async function exportSheetPptx(){
       if(imgs.length){
         const gap=0.25, w=(9-(gap*(imgs.length-1)))/imgs.length, h=w*0.75;
         imgs.forEach((p,i)=>{
-          try{ slide.addImage({path:p, x:0.5+i*(w+gap), y:y, w:w, h:h}); }catch(e){ console.error("image add error", e); }
+          try{ slide.addImage({path:driveEmbedUrl(p), x:0.5+i*(w+gap), y:y, w:w, h:h}); }catch(e){ console.error("image add error", e); }
         });
       } else if(!it.note){
         slide.addText(PPTX_TXT.noPhoto, {x:0.5,y:y,w:9,h:0.4,fontSize:12,color:"8A9791"});
@@ -1181,11 +1188,6 @@ function render(){
   if(state.view==="history") refreshHistoryView();
   if(state.view==="detail") loadDetailContent();
 }
-
-render();
-</script>
-</body>
-</html>
 
 render();
 </script>
